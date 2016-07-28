@@ -1,25 +1,26 @@
 var Colors = {
-	red:0xf25346,
-	white:0xd8d0d1,
+	red:0xFD5959,
+	white:0xFCFAEF,
 	brown:0x59332e,
 	pink:0xF5986E,
 	brownDark:0x23190f,
-	blue:0x68c3c0,
+	blue:0xE0FFF9,
 };
 
-var scene,
-		camera, fieldOfView, aspectRatio, nearPlane, farPlane, HEIGHT, WIDTH,
-		renderer, container;
+Physijs.scripts.worker = '/js/physijs_worker.js';
+Physijs.scripts.ammo = '/js/ammo.js';
+
+var scene,renderer,camera,controls;
 
 function createScene() {
-	HEIGHT = window.innerHeight;
-	WIDTH = window.innerWidth;
-	scene = new THREE.Scene();
-	scene.fog = new THREE.Fog(0xf7d9aa, 100, 950);
-	aspectRatio = WIDTH / HEIGHT;
-	fieldOfView = 60;
-	nearPlane = 1;
-	farPlane = 10000;
+	var HEIGHT = window.innerHeight;
+	var WIDTH = window.innerWidth;
+	scene = new Physijs.Scene;
+	scene.fog = new THREE.Fog(Colors.blue, 100, 950);
+	var aspectRatio = WIDTH / HEIGHT;
+	var fieldOfView = 90;
+	var nearPlane = 1;
+	var farPlane = 10000;
 	camera = new THREE.PerspectiveCamera(
 		fieldOfView,
 		aspectRatio,
@@ -27,32 +28,52 @@ function createScene() {
 		farPlane
 		);
 	camera.position.x = 0;
-	camera.position.z = 200;
+	camera.position.z = 0;
 	camera.position.y = 100;
+	scene.add( camera );
 	renderer = new THREE.WebGLRenderer({
 		alpha: true,
 		antialias: true
 	});
+	var element = renderer.domElement
 	renderer.setSize(WIDTH, HEIGHT);
 	renderer.shadowMap.enabled = true;
-	container = document.getElementById('world');
-	container.appendChild(renderer.domElement);
-	window.addEventListener('resize', handleWindowResize, false);
+	var container = document.getElementById('world');
+	container.appendChild(element);
+	window.addEventListener('resize', function(){handleWindowResize(renderer,camera)}, false);
+	controls = new THREE.OrbitControls(camera, element);
+	controls.target.set(
+		camera.position.x + 0.15,
+		camera.position.y,
+		camera.position.z
+	);
+	controls.noPan = true;
+	controls.noZoom = true;
+	scene.setGravity(new THREE.Vector3( 0, -20, 0 ));
+	function setOrientationControls(e) {
+		if (!e.alpha) {
+			return;
+		}
+		controls = new THREE.DeviceOrientationControls(camera, true);
+		controls.connect();
+		controls.update();
+		element.addEventListener('click', fullscreen, false);
+		window.removeEventListener('deviceorientation', setOrientationControls, true);
+	}
+	window.addEventListener('deviceorientation', setOrientationControls, true);
 }
 
 function handleWindowResize() {
-	HEIGHT = window.innerHeight;
-	WIDTH = window.innerWidth;
+	var HEIGHT = window.innerHeight;
+	var WIDTH = window.innerWidth;
 	renderer.setSize(WIDTH, HEIGHT);
 	camera.aspect = WIDTH / HEIGHT;
 	camera.updateProjectionMatrix();
 }
 
-var hemisphereLight, shadowLight;
-
 function createLights() {
-	hemisphereLight = new THREE.HemisphereLight(0xaaaaaa,0x000000, .9)
-	shadowLight = new THREE.DirectionalLight(0xffffff, .9);
+	var hemisphereLight = new THREE.HemisphereLight(0xaaaaaa,0x000000, .9)
+	var shadowLight = new THREE.DirectionalLight(0xffffff, .9);
 	shadowLight.position.set(150, 350, 350);
 	shadowLight.castShadow = true;
 	shadowLight.shadow.camera.left = -400;
@@ -65,181 +86,112 @@ function createLights() {
 	shadowLight.shadow.mapSize.height = 2048;
 	scene.add(hemisphereLight);
 	scene.add(shadowLight);
+	return {hemisphereLight,shadowLight}
 }
 
-Sea = function(){
-	var geom = new THREE.CylinderGeometry(600,600,800,40,10);
-	geom.applyMatrix(new THREE.Matrix4().makeRotationX(-Math.PI/2));
+function loop() {
+	var axisHelper = new THREE.AxisHelper(10);
+	scene.add(axisHelper);
+	scene.simulate();
+	renderer.render(scene,camera);
+	camera.updateProjectionMatrix();
+	controls.update();
+	requestAnimationFrame(loop);
+}
 
+Ground = function(){
+	var geom = new THREE.PlaneGeometry(5000,5000,32);
+	var mat = Physijs.createMaterial(new THREE.MeshPhongMaterial({
+		color:Colors.red,
+		transparent:true,
+		opacity:.6,
+		shading:THREE.FlatShading,
+	}),0.9,0.2);
+	this.mesh = new Physijs.PlaneMesh(geom, mat);
+	this.mesh.rotation.x = -Math.PI / 2;
+	this.mesh.receiveShadow = true;
+	this.mesh.position.y = 0;
+}
+
+GroundRing = function(radius,center){
+	var geom = new THREE.RingGeometry(radius,radius-2,20,1);
 	var mat = new THREE.MeshPhongMaterial({
 		color:Colors.blue,
 		transparent:true,
 		opacity:.6,
 		shading:THREE.FlatShading,
 	});
-	this.mesh = new THREE.Mesh(geom, mat);
-	this.mesh.receiveShadow = true;
+	this.mesh = new THREE.Mesh(geom,mat);
+	this.mesh.position.x = center.x;
+	this.mesh.position.y = center.y;
+	this.mesh.position.z = center.z;
+	this.mesh.rotation.x = -Math.PI / 2;
 }
 
-var sea;
-
-function createSea(){
-	sea = new Sea();
-	sea.mesh.position.y = -600;
-	scene.add(sea.mesh);
-}
-
-Cloud = function(){
-	this.mesh = new THREE.Object3D();
-	var geom = new THREE.BoxGeometry(20,20,20);
-		var mat = new THREE.MeshPhongMaterial({
-		color:Colors.white,
-	});
-	var nBlocs = 3+Math.floor(Math.random()*3);
-	for (var i=0; i<nBlocs; i++ ){
-		var m = new THREE.Mesh(geom, mat);
-		m.position.x = i*15;
-		m.position.y = Math.random()*10;
-		m.position.z = Math.random()*10;
-		m.rotation.z = Math.random()*Math.PI*2;
-		m.rotation.y = Math.random()*Math.PI*2;
-		var s = .1 + Math.random()*.9;
-		m.scale.set(s,s,s);
-		m.castShadow = true;
-		m.receiveShadow = true;
-		this.mesh.add(m);
+function createGround(){
+	var ground = new Ground();
+	scene.add(ground.mesh);
+	for(i = 1; i<21; i++){
+		var ring = new GroundRing(i*100,{x:0,y:200,z:0});
+		scene.add(ring.mesh);
 	}
+	return ground;
 }
-Sky = function(){
-	this.mesh = new THREE.Object3D();
-	this.nClouds = 20;
-	var stepAngle = Math.PI*2 / this.nClouds;
-	for(var i=0; i<this.nClouds; i++){
-		var c = new Cloud();
-		var a = stepAngle*i;
-		var h = 750 + Math.random()*200;
-		c.mesh.position.y = Math.sin(a)*h;
-		c.mesh.position.x = Math.cos(a)*h;
-		c.mesh.rotation.z = a + Math.PI/2;
-		c.mesh.position.z = -400-Math.random()*400;
-		var s = 1+Math.random()*2;
-		c.mesh.scale.set(s,s,s);
-		this.mesh.add(c.mesh);
+
+var Pile = function(count,scene,{x,y,z}){
+	for(i = 0; i<count; i++){
+		var mat = Physijs.createMaterial(new THREE.MeshPhongMaterial({
+			color:Colors.blue,
+			transparent:true,
+			opacity:1.0,
+			shading:THREE.FlatShading,
+		}),0.8,0.8);
+		var box = new Physijs.BoxMesh(
+		  new THREE.CubeGeometry( 2, 2, 2 ),
+		  mat
+		);
+		box.position.set(getRandomInt(-5,5)+x,getRandomInt(-5,5)+y,getRandomInt(-5,5)+z);
+		scene.add(box);
 	}
 }
 
-var sky;
-
-function createSky(){
-	sky = new Sky();
-	sky.mesh.position.y = -600;
-	scene.add(sky.mesh);
+function createPiles(gData) {
+	Object.keys(gData).reverse().map(function(g,i){
+		var datas = gData[g];
+		var angle = 0;
+		var increment = (2*Math.PI)/datas.length;
+		var radius = (i+1)*100;
+		datas.map(function(d){
+			var x = Math.floor(Math.sin(angle)*radius)
+			var z = Math.floor(Math.cos(angle)*radius)
+			console.log(x,z)
+			var pile = new Pile(d.number_of_victim_fatalities,scene,{x,y:150,z});
+			angle += increment
+		})
+	})
 }
 
-var AirPlane = function() {
-	this.mesh = new THREE.Object3D();
-	var geomCockpit = new THREE.BoxGeometry(60,50,50,1,1,1);
-  geomCockpit.vertices[4].y-=10;
-  geomCockpit.vertices[4].z+=20;
-  geomCockpit.vertices[5].y-=10;
-  geomCockpit.vertices[5].z-=20;
-  geomCockpit.vertices[6].y+=30;
-  geomCockpit.vertices[6].z+=20;
-  geomCockpit.vertices[7].y+=30;
-  geomCockpit.vertices[7].z-=20;
-	var matCockpit = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-	var cockpit = new THREE.Mesh(geomCockpit, matCockpit);
-	cockpit.castShadow = true;
-	cockpit.receiveShadow = true;
-	this.mesh.add(cockpit);
-	var geomEngine = new THREE.BoxGeometry(20,50,50,1,1,1);
-	var matEngine = new THREE.MeshPhongMaterial({color:Colors.white, shading:THREE.FlatShading});
-	var engine = new THREE.Mesh(geomEngine, matEngine);
-	engine.position.x = 40;
-	engine.castShadow = true;
-	engine.receiveShadow = true;
-	this.mesh.add(engine);
-	var geomTailPlane = new THREE.BoxGeometry(15,20,5,1,1,1);
-	var matTailPlane = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-	var tailPlane = new THREE.Mesh(geomTailPlane, matTailPlane);
-	tailPlane.position.set(-35,25,0);
-	tailPlane.castShadow = true;
-	tailPlane.receiveShadow = true;
-	this.mesh.add(tailPlane);
-	var geomSideWing = new THREE.BoxGeometry(40,8,150,1,1,1);
-	var matSideWing = new THREE.MeshPhongMaterial({color:Colors.red, shading:THREE.FlatShading});
-	var sideWing = new THREE.Mesh(geomSideWing, matSideWing);
-	sideWing.castShadow = true;
-	sideWing.receiveShadow = true;
-	this.mesh.add(sideWing);
-	var geomPropeller = new THREE.BoxGeometry(20,10,10,1,1,1);
-	var matPropeller = new THREE.MeshPhongMaterial({color:Colors.brown, shading:THREE.FlatShading});
-	this.propeller = new THREE.Mesh(geomPropeller, matPropeller);
-	this.propeller.castShadow = true;
-	this.propeller.receiveShadow = true;
-	var geomBlade = new THREE.BoxGeometry(1,100,20,1,1,1);
-	var matBlade = new THREE.MeshPhongMaterial({color:Colors.brownDark, shading:THREE.FlatShading});
-	var blade = new THREE.Mesh(geomBlade, matBlade);
-	blade.position.set(8,0,0);
-	blade.castShadow = true;
-	blade.receiveShadow = true;
-	this.propeller.add(blade);
-	this.propeller.position.set(50,0,0);
-	this.mesh.add(this.propeller);
-};
-
-var airplane;
-
-function createPlane(){
-	airplane = new AirPlane();
-	airplane.mesh.scale.set(.25,.25,.25);
-	airplane.mesh.position.y = 100;
-	scene.add(airplane.mesh);
+function getRandomArbitrary(min, max) {
+    return Math.random() * (max - min) + min;
 }
 
-function loop(){
-	sea.mesh.rotation.z += .005;
-	sky.mesh.rotation.z += .01;
-  updatePlane();
-	renderer.render(scene, camera);
-	requestAnimationFrame(loop);
-}
-
-var mousePos={x:0, y:0};
-
-function handleMouseMove(event) {
-	var tx = -1 + (event.clientX / WIDTH)*2;
-	var ty = 1 - (event.clientY / HEIGHT)*2;
-	mousePos = {x:tx, y:ty};
-}
-
-function updatePlane(){
-
-	var targetX = normalize(mousePos.x, -1, 1, -100, 100);
-	var targetY = normalize(mousePos.y, -1, 1, 25, 175);
-	airplane.mesh.position.y = targetY;
-	airplane.mesh.position.x = targetX;
-	airplane.propeller.rotation.x += 0.3;
-}
-
-function normalize(v,vmin,vmax,tmin, tmax){
-
-	var nv = Math.max(Math.min(v,vmax), vmin);
-	var dv = vmax-vmin;
-	var pc = (nv-vmin)/dv;
-	var dt = tmax-tmin;
-	var tv = tmin + (pc*dt);
-	return tv;
+function getRandomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 window.addEventListener('load', init, false);
 
+function prepareData(DATA) {
+	var groupedData = _.groupBy(DATA,function(d){return d.number_of_victim_fatalities})
+	console.log(groupedData)
+	return groupedData;
+}
+
 function init() {
+	var gData = prepareData(DATA);
 	createScene();
-	createLights()
-	createPlane();
-	createSea();
-	createSky();
-  document.addEventListener('mousemove', handleMouseMove, false);
-	loop();
+	createLights();
+	createGround();
+	createPiles(gData);
+	requestAnimationFrame(loop);
 }
